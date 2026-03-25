@@ -1,0 +1,22 @@
+{
+  "name": "Aga TimeSheet",
+  "short_name": "TimeSheet",
+  "description": "Weekly timesheet tracker",
+  "start_url": "/timesheet/",
+  "display": "standalone",
+  "background_color": "#1f2937",
+  "theme_color": "#111827",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/zameeczek/timesheet/main/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://raw.githubusercontent.com/zameeczek/timesheet/main/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
