@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Timesheet — offline</title>
+  <style>
+    :root{
+      --bg:#1f2937; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#3b82f6; --border:#374151;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{max-width:860px;margin:0 auto;padding:16px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    h1{font-size:18px;margin:0 0 8px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+    input[type="date"]{background:#0b1220;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px}
+    table{width:100%;border-collapse:collapse;table-layout:fixed}
+    th,td{padding:10px 8px;vertical-align:middle}
+    tbody tr:not(.comment-row){border-bottom:1px solid var(--border)}
+    tfoot tr{border-top:1px solid var(--border)}
+    th{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;text-align:center}
+    td select{
+      width:100%;
+      background:#0b1220;
+      border:1px solid var(--border);
+      color:var(--text);
+      border-radius:8px;
+      padding:8px;
+      white-space:nowrap;
+      text-align:center
+    }
+    td.total-cell{font-size:12px}
+    .right{text-align:center}
+    tfoot td{font-weight:700;text-align:center;font-size:12px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 12px;cursor:pointer}
+    button.ghost{background:#0b1220;color:var(--text);border:1px solid var(--border)}
+    .note,.footer{margin-top:10px;color:var(--muted);font-size:13px;text-align:center}
+
+    /* Column sizing: Day 13%, Start 27%, Finish 27%, Break 18%, Total 15% */
+    col.day{width:13%} col.start{width:27%} col.finish{width:27%} col.break{width:18%} col.total{width:15%}
+
+    /* === CLICKABLE DAY LABEL === */
+    .day-cell{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:0;
+    }
+    .day-label{
+      font-size:11px;
+      white-space:nowrap;
+      cursor:pointer;
+      font-weight:700;
+      padding:6px 6px;
+      border-radius:8px;
+      border:1px solid transparent;
+      user-select:none;
+    }
+    .day-label:hover{
+      border-color:#4b5563;
+      background:#0b1220;
+    }
+    .day-label.has-note{
+      color:var(--accent);
+    }
+
+    /* === INLINE COMMENT ROW (DriveTime-like) === */
+    .comment-row td{padding:10px 8px 12px 8px;background:#0b1220;border-bottom:1px solid var(--border)}
+    .comment-box{border:1px solid var(--border);border-radius:12px;padding:10px;background:#060b14}
+    .comment-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+    .comment-title{font-size:12px;color:var(--muted);margin:0;font-weight:600}
+    .comment-actions{display:flex;gap:8px;align-items:center}
+    .btn-mini{
+      background:transparent;border:1px solid var(--border);color:var(--text);
+      border-radius:10px;padding:6px 10px;cursor:pointer;font-size:12px;
+    }
+    .btn-mini:hover{ border-color:#4b5563; }
+    .btn-mini.danger{border-color:rgba(239,68,68,.55);color:#fecaca}
+    .btn-mini.danger:hover{ border-color:rgba(239,68,68,1); }
+
+    /* === AUTO-GROW COMMENT (1 line -> grows with content) === */
+    textarea{
+      width:100%;
+      resize:none;
+      overflow:hidden;
+      background:#060b14;
+      color:var(--text);
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+      outline:none;
+      font-family:inherit;
+      font-size:13px;
+      line-height:1.35;
+      min-height: calc(1.35em + 20px);
+    }
+
+    @media (max-width:560px){
+      .wrap{padding:10px}
+      th,td{padding:8px 6px}
+      h1{font-size:16px}
+    }
+
+    /* === OVERTIME === */
+    .has-overtime{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:1px;
+      font-size:11px;
+    }
+    .reg-part{
+      color: var(--text);
+      font-weight:600;
+    }
+    .ot-part{
+      color:#f97316;
+      font-weight:700;
+    }
+    .overtime-label{
+      color:#f97316;
+    }
+    .overtime-total{
+      color:#f97316 !important;
+      font-weight:700;
+    }
+    tfoot .overtime-label{ color:#f97316; }
+    tfoot #weeklyOvertime{ color:#f97316; font-weight:700; }
+    .footer-divider td{
+      border-top: 2px solid var(--border) !important;
+      padding: 2px 0 !important;
+      border-bottom: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <h1>Week commencing date:</h1>
+        <input id="wcd" type="date" />
+      </div>
+
+      <table id="sheet" aria-label="Weekly timesheet">
+        <col class="day"><col class="start"><col class="finish"><col class="break"><col class="total">
+        <thead>
+          <tr>
+            <th style="text-align:left;"></th><th>Start</th><th>Finish</th><th>Break</th><th>Total</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot>
+          <tr><td colspan="4">Regular hours</td><td id="weeklyNormal">00:00</td></tr>
+          <tr id="footerOvertimeRow" style="display:none"><td colspan="4" class="overtime-label">Overtime hours</td><td id="weeklyOvertime" class="overtime-total">00:00</td></tr>
+          <tr id="footerDividerRow" class="footer-divider" style="display:none"><td colspan="5"></td></tr>
+          <tr><td colspan="4">Total weekly hours</td><td id="weeklyGrand">00:00</td></tr>
+        </tfoot>
+      </table>
+
+      <div class="controls">
+        <button id="clearAll" class="ghost">Clear all</button>
+        <button id="genPdf">Generate PDF</button>
+      </div>
+
+      <div class="note">Works offline. Data is retained until manually cleared or changed.</div>
+      <div class="footer">© PePE. All rights reserved.</div>
+    </div>
+  </div>
+
+  <script>
+    const days=['MON','TUE','WED','THU','FRI','SAT','SUN'];
+    const STORAGE_DATA='timesheet_final_v6_comments';
+    const STORAGE_DATE='timesheet_wcd_final';
+
+    function toMin(hm){ if(!hm) return null; const [h,m]=hm.split(':').map(Number); return h*60+m; }
+    function toHM(mins){
+      if(mins==null) return '';
+      let m=Math.max(0,mins);
+      const h=Math.floor(m/60), mm=m%60;
+      return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+    }
+    function generateTimesAsc(start,end,step){
+      const s=toMin(start), e=toMin(end), arr=[];
+      for(let t=s;t<=e;t+=step){ arr.push(toHM(t)); }
+      return arr;
+    }
+    function generateTimesDesc(start,end,step){
+      const s=toMin(start), e=toMin(end), arr=[];
+      for(let t=e;t>=s;t-=step){ arr.push(toHM(t)); }
+      return arr;
+    }
+
+    const OVERTIME_START_MIN = toMin('06:00'); // start before this = overtime
+    const OVERTIME_FINISH_MIN = toMin('14:00'); // finish after this = overtime
+
+    // Start: ascending from 05:00 -> 23:45, then 00:00 -> 04:45 (wraps around midnight)
+    const _startFrom05  = generateTimesAsc('05:00','23:45',15);
+    const _startWrap    = generateTimesAsc('00:00','04:45',15);
+    const startOptions  = [..._startFrom05, ..._startWrap];
+
+    // Finish: descending from 14:00 -> 00:00, then 23:45 -> 14:15 (wraps around midnight)
+    const _finishDescA  = generateTimesDesc('00:00','15:00',15); // 15:00 down to 00:00
+    const _finishDescB  = generateTimesDesc('15:15','23:45',15); // 23:45 down to 15:15
+    const finishOptions = [..._finishDescA, ..._finishDescB];
+
+    function defaultRows(){
+      return Array(7).fill(null).map(()=>({ start:'', finish:'', break:'', comment:'' }));
+    }
+
+    function loadRows(){
+      try{
+        const raw = JSON.parse(localStorage.getItem(STORAGE_DATA));
+        const arr = Array.isArray(raw) ? raw : defaultRows();
+        for(let i=0;i<7;i++){
+          arr[i] = arr[i] || {};
+          arr[i].start = arr[i].start || '';
+          arr[i].finish = arr[i].finish || '';
+          arr[i].break = arr[i].break || '';
+          arr[i].comment = arr[i].comment || '';
+          if(arr[i].finish && !arr[i].break) arr[i].break='Y';
+        }
+        return arr;
+      }catch(e){
+        return defaultRows();
+      }
+    }
+    function saveRows(arr){ localStorage.setItem(STORAGE_DATA, JSON.stringify(arr)); }
+    function loadDate(){ return localStorage.getItem(STORAGE_DATE) || ''; }
+    function saveDate(v){ if(v) localStorage.setItem(STORAGE_DATE,v); else localStorage.removeItem(STORAGE_DATE); }
+
+    const tbody=document.querySelector('#sheet tbody');
+    const rows=[];
+
+    function calcRow(d){
+      if(!d || !d.start || !d.finish) return {total:0, regular:0, overtime:0};
+      let s = toMin(d.start);
+      let f = toMin(d.finish);
+      if(isNaN(s)||isNaN(f)) return {total:0, regular:0, overtime:0};
+      // Handle overnight shift: if finish <= start, assume finish is next day
+      if(f <= s) f += 24 * 60;
+      if(f <= s) return {total:0, regular:0, overtime:0};
+      const breakMins = (d.break==='Y') ? 30 : 0;
+      // Regular window is 06:00-14:00 (and 06:00+24h-14:00+24h for overnight)
+      // We check both the normal window and the +24h window to cover overnight shifts
+      function overlapWith(winStart, winEnd){
+        return Math.max(0, Math.min(f, winEnd) - Math.max(s, winStart));
+      }
+      const regRaw = overlapWith(OVERTIME_START_MIN, OVERTIME_FINISH_MIN)
+                   + overlapWith(OVERTIME_START_MIN + 1440, OVERTIME_FINISH_MIN + 1440);
+      const otRaw  = (f - s) - regRaw;
+      // Deduct break from regular first, then from overtime
+      const regNet    = Math.max(0, regRaw - breakMins);
+      const breakLeft = Math.max(0, breakMins - regRaw);
+      const otNet     = Math.max(0, otRaw - breakLeft);
+      return { total: regNet + otNet, regular: regNet, overtime: otNet };
+    }
+
+    function setDayNoteStyle(dayEl, comment){
+      dayEl.classList.toggle('has-note', !!String(comment||'').trim());
+    }
+
+    function persistDay(i){
+      const arr=loadRows();
+      const prevComment = arr[i]?.comment || '';
+      arr[i]={
+        start: rows[i].selStart.value || '',
+        finish: rows[i].selFinish.value || '',
+        break: rows[i].selBreak.value || '',
+        comment: prevComment
+      };
+      saveRows(arr);
+      setDayNoteStyle(rows[i].dayLabelEl, arr[i].comment);
+    }
+
+    function persistComment(i, value){
+      const arr=loadRows();
+      arr[i] = arr[i] || {};
+      arr[i].start = arr[i].start || '';
+      arr[i].finish = arr[i].finish || '';
+      arr[i].break = arr[i].break || '';
+      arr[i].comment = String(value || '');
+      saveRows(arr);
+      setDayNoteStyle(rows[i].dayLabelEl, arr[i].comment);
+    }
+
+    function recalc(){
+      const arr=loadRows();
+      let normalSum=0, overtimeSum=0;
+      for(let i=0;i<7;i++){
+        const {total, regular, overtime}=calcRow(arr[i]);
+        const hasOT = overtime > 0;
+        // Show total in cell; if overtime exists show both regular+OT
+        if(hasOT){
+          rows[i].tdTotal.innerHTML =
+            '<span class="reg-part">' + toHM(regular) + '</span>' +
+            '<span class="ot-part">+' + toHM(overtime) + '</span>';
+        } else {
+          rows[i].tdTotal.textContent = toHM(total);
+        }
+        rows[i].tdTotal.classList.toggle('has-overtime', hasOT);
+        normalSum   += regular;
+        overtimeSum += overtime;
+      }
+      const totalSum = normalSum + overtimeSum;
+      document.getElementById('weeklyNormal').textContent   = toHM(normalSum);
+      document.getElementById('weeklyOvertime').textContent = toHM(overtimeSum);
+      document.getElementById('weeklyGrand').textContent    = toHM(totalSum);
+      document.getElementById('footerOvertimeRow').style.display = overtimeSum > 0 ? '' : 'none';
+      document.getElementById('footerDividerRow').style.display  = overtimeSum > 0 ? '' : 'none';
+      saveRows(arr);
+    }
+
+    function toggleCommentRow(i){
+      const cr = rows[i].commentTr;
+      const isHidden = cr.style.display === 'none';
+      cr.style.display = isHidden ? '' : 'none';
+      if(isHidden){
+        setTimeout(()=>{
+          rows[i].commentTa.focus();
+          autoGrow(rows[i].commentTa);
+        }, 0);
+      }
+    }
+
+    function createSelect(options, value){
+      const sel = document.createElement('select');
+      const empty=document.createElement('option'); empty.value=''; empty.textContent=''; sel.appendChild(empty);
+      options.forEach(t=>{
+        const o=document.createElement('option');
+        o.value=t; o.textContent=t;
+        sel.appendChild(o);
+      });
+      sel.value = value || '';
+      return sel;
+    }
+
+    function autoGrow(el){
+      if(!el) return;
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    }
+
+    function createRow(day, idx, data){
+      // MAIN ROW
+      const tr=document.createElement('tr');
+
+      const tdDay=document.createElement('td');
+
+      const dayCell=document.createElement('div');
+      dayCell.className='day-cell';
+
+      const dayLabel=document.createElement('span');
+      dayLabel.className='day-label';
+      dayLabel.textContent=day;
+      dayCell.appendChild(dayLabel);
+
+      tdDay.appendChild(dayCell);
+      tr.appendChild(tdDay);
+
+      // START
+      const tdStart=document.createElement('td');
+      const drumStart = createSelect(startOptions, data?.start || '');
+      drumStart.addEventListener('change',()=>{ persistDay(idx); recalc(); });
+      tdStart.appendChild(drumStart);
+      tr.appendChild(tdStart);
+
+      // FINISH
+      const tdFinish=document.createElement('td');
+      const drumFinish = createSelect(finishOptions, data?.finish || '');
+      drumFinish.addEventListener('change',()=>{
+        if(drumFinish.value){
+          if(!drumStart.value) drumStart.value='06:00';
+          if(!selBreak.value) selBreak.value='Y';
+        } else {
+          drumStart.value='';
+          selBreak.value='';
+        }
+        persistDay(idx); recalc();
+      });
+      tdFinish.appendChild(drumFinish);
+      tr.appendChild(tdFinish);
+
+      // BREAK
+      const tdBreak=document.createElement('td');
+      const selBreak=document.createElement('select');
+      ['','Y','N'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; selBreak.appendChild(o); });
+      selBreak.value=data?.break||'';
+      tdBreak.appendChild(selBreak);
+      tr.appendChild(tdBreak);
+
+      // TOTAL
+      const tdTotal=document.createElement('td');
+      tdTotal.className='right total-cell';
+      tdTotal.textContent='00:00';
+      tr.appendChild(tdTotal);
+
+      // COMMENT ROW
+      const commentTr = document.createElement('tr');
+      commentTr.className = 'comment-row';
+      const commentTd = document.createElement('td');
+      commentTd.colSpan = 5;
+
+      const box = document.createElement('div');
+      box.className = 'comment-box';
+
+      const top = document.createElement('div');
+      top.className = 'comment-top';
+
+      const title = document.createElement('p');
+      title.className = 'comment-title';
+      title.textContent = `Comment — ${day}`;
+
+      const actions = document.createElement('div');
+      actions.className = 'comment-actions';
+
+      const btnClose = document.createElement('button');
+      btnClose.type = 'button';
+      btnClose.className = 'btn-mini';
+      btnClose.textContent = 'Close';
+
+      const btnClear = document.createElement('button');
+      btnClear.type = 'button';
+      btnClear.className = 'btn-mini danger';
+      btnClear.textContent = 'Clear';
+
+      actions.appendChild(btnClear);
+      actions.appendChild(btnClose);
+
+      top.appendChild(title);
+      top.appendChild(actions);
+
+      const ta = document.createElement('textarea');
+      ta.placeholder = 'Comment...';
+      ta.value = data?.comment || '';
+      ta.setAttribute('rows','1');
+
+      ta.addEventListener('input',()=>{
+        persistComment(idx, ta.value);
+        autoGrow(ta);
+      });
+
+      btnClose.addEventListener('click',()=>{ commentTr.style.display = 'none'; });
+      btnClear.addEventListener('click',()=>{
+        ta.value='';
+        persistComment(idx,'');
+        autoGrow(ta);
+      });
+
+      box.appendChild(top);
+      box.appendChild(ta);
+
+      commentTd.appendChild(box);
+      commentTr.appendChild(commentTd);
+      commentTr.style.display = 'none';
+
+      // day click toggles comment row
+      dayLabel.addEventListener('click',()=>toggleCommentRow(idx));
+
+      // initial style + textarea height
+      setDayNoteStyle(dayLabel, data?.comment || '');
+      setTimeout(()=>autoGrow(ta), 0);
+
+      selBreak.addEventListener('change',()=>{ persistDay(idx); recalc(); });
+
+      return {
+        tr, commentTr,
+        selStart: drumStart, selFinish: drumFinish, selBreak, tdTotal,
+        dayLabelEl: dayLabel,
+        commentTa: ta
+      };
+    }
+
+    function init(){
+      const saved=loadRows();
+      for(let i=0;i<7;i++){
+        const obj=createRow(days[i], i, saved[i]||{});
+        tbody.appendChild(obj.tr);
+        tbody.appendChild(obj.commentTr);
+        rows.push(obj);
+      }
+      const arr=loadRows();
+      saveRows(arr);
+      recalc();
+    }
+
+    // ==== WEEK COMMENCING DATE ====
+    const wcd=document.getElementById('wcd');
+    wcd.value = loadDate();
+    wcd.addEventListener('change',()=>saveDate(wcd.value));
+
+    // ==== CLEAR ALL ====
+    document.getElementById('clearAll').addEventListener('click',()=>{
+      if(!confirm('Clear all data and the week date?')) return;
+      localStorage.removeItem(STORAGE_DATA);
+      localStorage.removeItem(STORAGE_DATE);
+
+      rows.forEach(r=>{
+        r.selStart.value='';
+        r.selFinish.value='';
+        r.selBreak.value='';
+        r.tdTotal.textContent='00:00';
+        r.tdTotal.classList.remove('has-overtime');
+        r.commentTa.value='';
+        r.commentTr.style.display='none';
+        setDayNoteStyle(r.dayLabelEl, '');
+        r.commentTa.style.height = 'auto';
+      });
+      document.getElementById('weeklyNormal').textContent='00:00';
+      document.getElementById('weeklyOvertime').textContent='00:00';
+      document.getElementById('weeklyGrand').textContent='00:00';
+      document.getElementById('footerOvertimeRow').style.display='none';
+      document.getElementById('footerDividerRow').style.display='none';
+      wcd.value='';
+    });
+
+    // =========================
+    // PDF GENERATOR (offline, no libs)
+    // =========================
+    function pdfEscape(s){
+      return String(s ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)')
+        .replace(/\r?\n/g, ' ');
+    }
+
+    function wrapText(str, maxChars){
+      const s = String(str ?? '').replace(/\r?\n/g,' ').trim();
+      if(!s) return [''];
+      const words = s.split(/\s+/);
+      const lines = [];
+      let line = '';
+      for(const w of words){
+        if(!line) line = w;
+        else if((line + ' ' + w).length <= maxChars) line += ' ' + w;
+        else { lines.push(line); line = w; }
+      }
+      if(line) lines.push(line);
+      return lines;
+    }
+
+    function buildSimplePdf({titleLines, rowsData, weeklyRegular, weeklyOvertime, weeklyTotal}){
+      const W = 595.28, H = 841.89;
+      const left = 40;
+      let y = 800;
+
+      const fontSizeTitle = 14;
+      const fontSize = 10;
+      const lineGap = 14;
+
+      const xDay     = left;
+      const xStart   = 100;
+      const xFinish  = 175;
+      const xBreak   = 255;
+      const xReg     = 305;  // Regular
+      const xOT      = 360;  // Overtime
+      const xTotal   = 415;  // Total
+      const xComment = 460;
+
+      const content = [];
+      content.push('BT');
+      content.push('/F1 ' + fontSizeTitle + ' Tf');
+
+      for(const tl of titleLines){
+        content.push('1 0 0 1 ' + left + ' ' + y + ' Tm');
+        content.push('(' + pdfEscape(tl) + ') Tj');
+        y -= 18;
+      }
+
+      y -= 6;
+      content.push('/F1 ' + fontSize + ' Tf');
+
+      const headerY = y;
+      content.push('1 0 0 1 ' + xDay     + ' ' + headerY + ' Tm (DAY) Tj');
+      content.push('1 0 0 1 ' + xStart   + ' ' + headerY + ' Tm (START) Tj');
+      content.push('1 0 0 1 ' + xFinish  + ' ' + headerY + ' Tm (FINISH) Tj');
+      content.push('1 0 0 1 ' + xBreak   + ' ' + headerY + ' Tm (BRK) Tj');
+      content.push('1 0 0 1 ' + xReg     + ' ' + headerY + ' Tm (REG) Tj');
+      content.push('1 0 0 1 ' + xOT      + ' ' + headerY + ' Tm (OT) Tj');
+      content.push('1 0 0 1 ' + xTotal   + ' ' + headerY + ' Tm (TOTAL) Tj');
+      content.push('1 0 0 1 ' + xComment + ' ' + headerY + ' Tm (COMMENT) Tj');
+
+      y -= 4;
+      // header underline
+      content.push('ET');
+      content.push(left + ' ' + y + ' m ' + (W-left) + ' ' + y + ' l S');
+      content.push('BT');
+      content.push('/F1 ' + fontSize + ' Tf');
+      y -= 10;
+
+      for(const r of rowsData){
+        const commentLines = wrapText(r.comment, 22);
+        const hasOT = !!r.overtime;
+        // each row takes max(commentLines, hasOT?2:1) lines
+        const dataLines = hasOT ? 2 : 1;
+        const rowLines = Math.max(dataLines, commentLines.length);
+
+        if(y - (rowLines * lineGap) < 80){ break; }
+
+        // Day, Start, Finish, Break — on first line
+        content.push('1 0 0 1 ' + xDay    + ' ' + y + ' Tm (' + pdfEscape(r.day)    + ') Tj');
+        content.push('1 0 0 1 ' + xStart  + ' ' + y + ' Tm (' + pdfEscape(r.start)  + ') Tj');
+        content.push('1 0 0 1 ' + xFinish + ' ' + y + ' Tm (' + pdfEscape(r.finish) + ') Tj');
+        content.push('1 0 0 1 ' + xBreak  + ' ' + y + ' Tm (' + pdfEscape(r.break)  + ') Tj');
+
+        if(hasOT){
+          // Line 1: regular
+          content.push('1 0 0 1 ' + xReg   + ' ' + y + ' Tm (' + pdfEscape(r.regular) + ') Tj');
+          content.push('1 0 0 1 ' + xTotal + ' ' + y + ' Tm (' + pdfEscape(r.regular) + ') Tj');
+          const y2 = y - lineGap;
+          // Line 2: overtime label + ot value
+          content.push('1 0 0 1 ' + xReg   + ' ' + y2 + ' Tm (OT:) Tj');
+          content.push('1 0 0 1 ' + xOT    + ' ' + y2 + ' Tm (' + pdfEscape(r.overtime) + ') Tj');
+          content.push('1 0 0 1 ' + xTotal + ' ' + y2 + ' Tm (' + pdfEscape(r.total) + ') Tj');
+        } else {
+          content.push('1 0 0 1 ' + xReg   + ' ' + y + ' Tm (' + pdfEscape(r.regular) + ') Tj');
+          content.push('1 0 0 1 ' + xTotal + ' ' + y + ' Tm (' + pdfEscape(r.total)   + ') Tj');
+        }
+
+        // Comment lines
+        for(let i=0;i<commentLines.length;i++){
+          const cy = y - (i * lineGap);
+          if(commentLines[i].trim())
+            content.push('1 0 0 1 ' + xComment + ' ' + cy + ' Tm (' + pdfEscape(commentLines[i]) + ') Tj');
+        }
+
+        y -= rowLines * lineGap;
+      }
+
+      // Summary footer
+      y -= 8;
+      content.push('ET');
+      content.push(left + ' ' + y + ' m ' + (W-left) + ' ' + y + ' l S');
+      y -= 14;
+      content.push('BT');
+      content.push('/F1 ' + fontSize + ' Tf');
+
+      content.push('1 0 0 1 ' + left + ' ' + y + ' Tm (Regular hours:) Tj');
+      content.push('1 0 0 1 ' + xTotal + ' ' + y + ' Tm (' + pdfEscape(weeklyRegular) + ') Tj');
+      y -= lineGap;
+
+      if(weeklyOvertime && weeklyOvertime !== '00:00'){
+        content.push('1 0 0 1 ' + left + ' ' + y + ' Tm (Overtime hours:) Tj');
+        content.push('1 0 0 1 ' + xTotal + ' ' + y + ' Tm (' + pdfEscape(weeklyOvertime) + ') Tj');
+        y -= 4;
+        content.push('ET');
+        content.push(left + ' ' + y + ' m ' + (xTotal+40) + ' ' + y + ' l S');
+        content.push('BT');
+        content.push('/F1 ' + fontSize + ' Tf');
+        y -= 10;
+      }
+
+      content.push('/F1 12 Tf');
+      content.push('1 0 0 1 ' + left + ' ' + y + ' Tm (Total weekly hours: ' + pdfEscape(weeklyTotal) + ') Tj');
+
+      content.push('ET');
+
+      const stream = content.join('\n') + '\n';
+
+      const objects = [];
+      function addObject(str){ objects.push(str); }
+
+      addObject('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+      addObject('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+      addObject(
+        '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W.toFixed(2) + ' ' + H.toFixed(2) + '] ' +
+        '/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n'
+      );
+      addObject('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
+      addObject('5 0 obj\n<< /Length ' + stream.length + ' >>\nstream\n' + stream + 'endstream\nendobj\n');
+
+      let pdf = '%PDF-1.4\n';
+      const offsets = [0];
+      for(const obj of objects){
+        offsets.push(pdf.length);
+        pdf += obj;
+      }
+      const xrefStart = pdf.length;
+      pdf += 'xref\n0 ' + (objects.length + 1) + '\n';
+      pdf += '0000000000 65535 f \n';
+      for(let i=1;i<offsets.length;i++){
+        pdf += String(offsets[i]).padStart(10,'0') + ' 00000 n \n';
+      }
+      pdf += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\n';
+      pdf += 'startxref\n' + xrefStart + '\n%%EOF';
+
+      return pdf;
+    }
+
+    function generatePdf(){
+      const week = (wcd.value || loadDate() || '').trim();
+      const fileDate = week || 'NO_DATE';
+      const filename = `TimeSheet_${fileDate}.pdf`;
+
+      const data = loadRows();
+      const rowsData = [];
+      let weeklyMins = 0;
+
+      for(let i=0;i<7;i++){
+        const d = data[i] || {};
+        const {total, regular, overtime} = calcRow(d);
+        weeklyMins += total;
+        rowsData.push({
+          day: days[i],
+          start: d.start || '',
+          finish: d.finish || '',
+          break: d.break || '',
+          total: toHM(total),
+          regular: toHM(regular),
+          overtime: overtime > 0 ? toHM(overtime) : '',
+          comment: (d.comment || '').trim()
+        });
+      }
+
+      let weeklyRegularMins = 0, weeklyOvertimeMins = 0;
+      rowsData.forEach(r => {
+        const d = data[rowsData.indexOf(r)];
+        const {regular, overtime} = calcRow(d);
+        weeklyRegularMins  += regular;
+        weeklyOvertimeMins += overtime;
+      });
+
+      const weeklyTotal    = toHM(weeklyMins);
+      const weeklyRegular  = toHM(weeklyRegularMins);
+      const weeklyOvertime = toHM(weeklyOvertimeMins);
+
+      const titleLines = [
+        'TimeSheet',
+        week ? ('Week commencing: ' + week) : 'Week commencing: (not set)'
+      ];
+
+      const pdfText = buildSimplePdf({titleLines, rowsData, weeklyRegular, weeklyOvertime, weeklyTotal});
+      const blob = new Blob([pdfText], {type: 'application/pdf'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('genPdf').addEventListener('click', generatePdf);
+
+    init();
+  </script>
+</body>
+</html>
