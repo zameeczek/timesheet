@@ -1,7 +1,7 @@
 {
-  "name": "Aga TimeSheet",
-  "short_name": "TimeSheet",
-  "description": "Weekly timesheet tracker",
+  "name": "ClockIt",
+  "short_name": "ClockIt",
+  "description": "Weekly timesheet tracker with overtime",
   "start_url": "/timesheet/",
   "display": "standalone",
   "background_color": "#1f2937",
